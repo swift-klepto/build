@@ -7,7 +7,7 @@ You need Python as this build script and the Swift build script and the SwiftPM 
 
 You need a host Swift toolchain of the same version as the klepto toolchain to build ̀ klepto-swiftpm`. You also need CMake, and all other dependencies of a regular Swift toolchain build.
 
-You also obviously need a devkitpro environment setup with devkitA64 and libnx. The `DEVKITPRO` environment variable must be set.
+You also obviously need a devkitPro environment setup with devkitA64 and libnx. The `DEVKITPRO` environment variable must be set.
 
 # How to use
 1. Clone every repository in the organization next to each other
