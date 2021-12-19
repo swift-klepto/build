@@ -120,6 +120,7 @@ def build_swiftpm(
                 install_path.absolute(),
                 "--reconfigure" if reconfigure else "",
                 configuration_arg,
+                # TODO: change build dir to build/swiftpm
             ],
             cwd="klepto-swiftpm",
         )
@@ -180,9 +181,101 @@ def build_frontend(
     symlink(frontend_path / "klepto-frontend", klepto_path)
 
 
+def _get_clang_cflags(devkitpro_path: Path):
+    gcc_path = devkitpro_path / "devkitA64" / "bin" / "aarch64-none-elf-gcc"
+    gpp_path = devkitpro_path / "devkitA64" / "bin" / "aarch64-none-elf-g++"
+
+    # Run devkitA64 gcc for isystem paths
+    gcc_process = run_subprocess(
+        [str(gcc_path.absolute()), "-xc++", "-E", "-Wp,-v", "-"],
+        stdin=DEVNULL,
+        stdout=PIPE,
+        stderr=STDOUT,
+    )
+    include_paths = [
+        f"/{path}"  # regex eats first / so put it back in
+        for path in re.findall(
+            r"^\s+\/(.*?)$", gcc_process.stdout.decode(), flags=re.MULTILINE
+        )
+    ] + [str((devkitpro_path / "libnx" / "include").absolute())]
+
+    isystems = [f"-isystem{path}" for path in include_paths]
+
+    return [
+        "-Wno-gnu-include-next",
+        "-D__SWITCH__",
+        "-D__DEVKITA64__",
+        "-D__unix__",
+        "-D__linux__",
+        "-fPIE",
+        "-nostdinc",
+        "-nostdinc++",
+        "-D_POSIX_C_SOURCE=200809",
+        "-D_GNU_SOURCE",
+        # libnx already included in isystem
+        f"-I{str(devkitpro_path.absolute())}/portlibs/switch/include/",
+        "-mno-tls-direct-seg-refs",
+        "-Qunused-arguments",
+        "-Xclang",
+        "-target-feature",
+        "-Xclang",
+        "+read-tp-soft",
+        "-ftls-model=local-exec",
+    ] + isystems
+
+
+def build_libdispatch(
+    install_path: Path,
+    configuration: Configuration,
+    devkitpro_path: Path,
+    icu_path: Path,
+    versions_str: str,
+    reconfigure: bool,
+):
+    source_dir = Path("klepto-libdispatch")
+    build_dir = Path("build") / "libdispatch"
+
+    # install_path is toolchain path
+    toolchain_bindir = install_path / "usr" / "bin"
+    clang = toolchain_bindir / "clang"
+    clangpp = toolchain_bindir / "clang++"
+
+    build_dir.mkdir(exist_ok=True, parents=True)
+
+    cflags = _get_clang_cflags(devkitpro_path)
+    cflags += ["-DDISPATCH_USE_OS_DEBUG_LOG", "-U__linux__"]
+
+    # Run cmake
+    run_subprocess(
+        [
+            "cmake",
+            "-G",
+            "Ninja",
+            str(source_dir.absolute()),
+            f"-DCMAKE_C_COMPILER={str(clang.absolute())}",
+            f"-DCMAKE_CXX_COMPILER={str(clangpp.absolute())}",
+            "-DBUILD_SHARED_LIBS:BOOL=NO",
+            f"-DCMAKE_C_FLAGS={' '.join(cflags)}",
+            f"-DCMAKE_CXX_FLAGS={' '.join(cflags)}",
+        ],
+        cwd=str(build_dir.absolute()),
+    )
+
+    # Run ninja
+    run_subprocess(
+        ["ninja", "-v"],
+        cwd=str(build_dir.absolute()),
+    )
+
+
 products = [
-    Product("icu", "icu", build_icu),  # dependency of toolchain so build it first
-    Product("toolchain", "toolchain", build_toolchain),  # swift + clang
+    # toolchain dependencies
+    # TODO: this needs clang to work, which is part of toolchain, find a way to first build llvm+clang then dispatch then swift
+    Product("libdispatch", "toolchain", build_libdispatch),
+    Product("icu", "icu", build_icu),
+    # swift + clang
+    Product("toolchain", "toolchain", build_toolchain),
+    # host tools
     Product("swiftpm", "swiftpm", build_swiftpm),
     Product("frontend", "klepto-frontend", build_frontend),
 ]
